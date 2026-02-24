@@ -1,4 +1,4 @@
-# 🎮 BinaxEngine - Game Engine (v0.1.0 Alpha)
+# 🎮 BinaxEngine - Game Engine (v0.2.0 Alpha)
 
 [![CMake](https://img.shields.io/badge/CMake-3.15+-blue?style=flat-square&logo=cmake)](https://cmake.org/)
 [![C++](https://img.shields.io/badge/C++-17-orange?style=flat-square&logo=cplusplus)](https://isocpp.org/)
@@ -6,8 +6,8 @@
 [![Windows](https://img.shields.io/badge/Platform-Windows-blue?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
 [![Status](https://img.shields.io/badge/status-alpha-yellow?style=flat-square)]()
 
-**⚠️ TEST VERSION - FIRST RELEASE ⚠️**  
-This is the very first test release of BinaxEngine. It's experimental and under active development!
+**⚠️ TEST VERSION - EXPERIMENTAL RELEASE ⚠️**  
+This is a test release of BinaxEngine. Everything is work in progress, bugs are expected, and the engine is constantly evolving!
 
 **BinaxEngine** is a lightweight game engine built with C++ and OpenGL, featuring an integrated editor for scene management and game development.
 
@@ -15,24 +15,34 @@ This is the very first test release of BinaxEngine. It's experimental and under 
 
 ## ✨ Features (Current)
 
-- 🔧 **Basic ImGui Editor Interface** — Simple editor with controls
-- 📦 **Scene Management** — Create game objects
-- 🎨 **Mesh & Primitive Rendering** — Basic shapes
-- 🎥 **Shader System** — Custom shader support
-- 🔍 **ImGuizmo Integration** — Transform controls (translate, rotate, scale)
-- 📁 **Asset Management** — Organized assets directory structure
-- 🚀 **CMake Build System** — Easy configuration
+- 🔧 **ImGui Editor Interface** — Intuitive editor with docking and controls
+- 📦 **Scene Management** — Create, delete, and duplicate game objects
+- 🎨 **Mesh & Primitive Rendering** — Cubes, spheres, grids, pyramids
+- 🎥 **Shader System** — Custom shader support with live reload (coming soon)
+- 🔍 **ImGuizmo Integration** — 3D transform controls (translate, rotate, scale)
+- 📁 **Asset Management** — Organized assets directory with shader and texture support
+
+### 🆕 New in v0.2.0
+- 🖼️ **Material System** — Per-object materials with adjustable parameters
+- 📥 **Texture Loading** — Load diffuse and normal maps via file dialog
+- 🌄 **Normal Mapping** — Realistic surface detail with normal maps and adjustable strength
+- 🔄 **UV Control** — Per-material UV scaling
+- 🌌 **Skybox** — Cubemap-based environment background
+- ⚙️ **Material Parameters** — Metallic and roughness sliders for PBR-style workflow
+- 🎛️ **Real-time Material Inspector** — Edit material properties on the fly
+- 🌞 **Lighting Controls** — Adjustable light position, color, and intensity
 
 ## 🔮 Planned Features
 
-- [ ] Physics engine
-- [ ] Audio system
+- [ ] Physics engine (Bullet or custom)
+- [ ] Audio system (OpenAL or SoLoud)
 - [ ] Particle systems
-- [ ] Scene serialization
-- [ ] Material system
-- [ ] Lighting
+- [ ] Scene serialization (save/load)
+- [ ] Multiple light sources
 - [ ] Terrain generation
-- [ ] Scripting support
+- [ ] Scripting support (Lua)
+- [ ] Shadow mapping
+- [ ] Post-processing (bloom, HDR)
 
 ---
 
@@ -45,8 +55,10 @@ The engine uses the following libraries (included in `libs/`):
 - **[ImGui](https://github.com/ocornut/imgui)** — Immediate mode GUI (v1.90)
 - **[ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)** — 3D manipulation controls
 - **[GLM](https://github.com/g-truc/glm)** — Mathematics for graphics (v0.9.9)
+- **[stb_image](https://github.com/nothings/stb)** — Image loading
 
 ---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -61,14 +73,3 @@ The engine uses the following libraries (included in `libs/`):
    ```bash
    git clone https://github.com/YOUR_USERNAME/BinaxEngine.git
    cd BinaxEngine
-  
-### Build with CMake
-
-mkdir build
-cd build
-cmake ..
-cmake --build . --config Release
-
-### Run
-
-./Release/BinaxEngine.exe
