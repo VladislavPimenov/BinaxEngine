@@ -115,7 +115,7 @@ This release introduces major features: physics, advanced materials, model impor
 
 ### Build Steps
 ```bash
-git clone https://github.com/YOUR_USERNAME/BinaxEngine.git
+git clone https://github.com/VladislavPim/BinaxEngine.git
 cd BinaxEngine
 mkdir build
 cd build
