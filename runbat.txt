@@ -1,1 +1,1 @@
-Start-Process "D:\Projects\C++\BinaxEngine\cmakebuild.bat"
+Start-Process "BinaxEngine\cmakebuild.bat"
