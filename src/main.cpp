@@ -1,66 +1,58 @@
-﻿#include <iostream>
+#include <iostream>
+#include <vector>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include "Graphics/Shader.h"
-#include "Graphics/Skybox.h"          // добавили
+#include "Graphics/Skybox.h"
 #include "Graphics/Primitives.h"
 #include "Scene/SceneManager.h"
-#include "Scene/Camera.h"
 #include "Editor/EditorUI.h"
 
-// Размеры окна
-const unsigned int SCR_WIDTH = 1600;
-const unsigned int SCR_HEIGHT = 900;
+const unsigned int SCR_WIDTH = 1920;
+const unsigned int SCR_HEIGHT = 1080;
 
-// Глобальные объекты
 SceneManager g_SceneManager;
 EditorUI g_EditorUI;
-Camera g_Camera(glm::vec3(0.0f, 2.0f, 5.0f));
 
-// Тайминги
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
-
-// Мышь
 bool firstMouse = true;
 bool mouseCaptured = false;
 
-// Шейдеры
 Shader shader;
 Shader gridShader;
 Shader gizmoShader;
-Shader skyboxShader;          // <-- добавили
+Shader skyboxShader;
+Shader depthShader;
 
-// Skybox
 Skybox skybox;
 
-// Тени (пока не используются)
-unsigned int depthMapFBO = 0;
-unsigned int depthMap = 0;
-const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+// Карта теней (теперь не const, чтобы можно было менять размер)
+unsigned int depthMapFBO;
+unsigned int depthMap;
+unsigned int SHADOW_WIDTH = 2048;
+unsigned int SHADOW_HEIGHT = 2048;
 
-// Прототипы
 void processInput(GLFWwindow* window);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 bool initShaders();
 bool initShadowMap();
+glm::mat4 calculateLightSpaceMatrix(const glm::vec3& lightPos, const glm::vec3& center = glm::vec3(0.0f));
 
 int main() {
     std::cout << "=== Binax Engine Editor ===" << std::endl;
 
-    // 1. Инициализация GLFW
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_SAMPLES, 4);
 
-    // 2. Создание окна
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Binax Engine Editor", NULL, NULL);
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
@@ -69,57 +61,44 @@ int main() {
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
-
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
     glfwSetKeyCallback(window, key_callback);
 
-    // 3. Инициализация GLEW
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
         std::cerr << "GLEW init failed!" << std::endl;
         return -1;
     }
 
-    // 4. Настройка OpenGL
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
     glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
-
     std::cout << "OpenGL: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "GPU: " << glGetString(GL_RENDERER) << std::endl;
 
-    // 5. Инициализация сцены
-    g_SceneManager.Initialize();
-
-    // 6. Инициализация UI
+        g_SceneManager.InitializePhysics(); // сначала мир
+        g_SceneManager.Initialize();        // потом объекты (они вызовут UpdatePhysicsBody, и мир уже существует)// <-- важно
     if (!g_EditorUI.Initialize(window, &g_SceneManager)) {
         std::cerr << "Failed to initialize EditorUI" << std::endl;
         return -1;
     }
+    g_EditorUI.SetSkybox(&skybox);
 
-    // 7. Загрузка шейдеров
-    if (!initShaders()) {
-        return -1;
-    }
+    if (!initShaders()) return -1;
+    if (!initShadowMap()) return -1;
 
-    // 8. Загрузка Skybox (после шейдеров)
-    if (!skybox.Load(
-        "assets/textures/skybox/right.png",
-        "assets/textures/skybox/left.png",
-        "assets/textures/skybox/top.png",
-        "assets/textures/skybox/bottom.png",
-        "assets/textures/skybox/front.png",
-        "assets/textures/skybox/back.png"
-    )) {
-        std::cerr << "Failed to load skybox textures" << std::endl;
-    }
+    skybox.Load(
+        "resources/embedded_assets/skybox/right.png",
+        "resources/embedded_assets/skybox/left.png",
+        "resources/embedded_assets/skybox/top.png",
+        "resources/embedded_assets/skybox/bottom.png",
+        "resources/embedded_assets/skybox/front.png",
+        "resources/embedded_assets/skybox/back.png"
+    );
 
-    // 9. Инициализация shadow map
-    initShadowMap();
-
-    // 10. Главный цикл
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = static_cast<float>(glfwGetTime());
         deltaTime = currentFrame - lastFrame;
@@ -129,58 +108,169 @@ int main() {
         g_EditorUI.HandleShortcuts();
 
         auto& settings = g_EditorUI.GetSettings();
-        glm::vec3 lightPos = settings.light_pos;
-        glm::vec3 lightColor = settings.light_color;
 
-        // Матрицы проекции и вида
+        // --- Динамическое изменение размера карты теней ---
+        static unsigned int lastShadowMapSize = SHADOW_WIDTH;
+        if (settings.shadowMapSize != lastShadowMapSize) {
+            lastShadowMapSize = settings.shadowMapSize;
+            SHADOW_WIDTH = settings.shadowMapSize;
+            SHADOW_HEIGHT = settings.shadowMapSize;
+            glDeleteFramebuffers(1, &depthMapFBO);
+            glDeleteTextures(1, &depthMap);
+            initShadowMap();
+        }
+
+        g_SceneManager.UpdatePhysics(deltaTime);
+
+        // --- Получаем активную камеру ---
+        auto activeCamera = g_SceneManager.GetActiveCamera();
+        if (!activeCamera) {
+            glfwSwapBuffers(window);
+            glfwPollEvents();
+            continue;
+        }
+
         float aspect = (float)SCR_WIDTH / (float)SCR_HEIGHT;
-        glm::mat4 projection = g_Camera.GetProjectionMatrix(aspect);
-        glm::mat4 view = g_Camera.GetViewMatrix();
+        glm::mat4 projection = activeCamera->GetCameraProjectionMatrix(aspect);
+        glm::mat4 view = activeCamera->GetCameraViewMatrix();
 
-        // Очистка буфера
+        // --- Находим направленный свет для карты теней ---
+        glm::vec3 directionalLightPos(2.0f, 4.0f, 2.0f);
+        glm::vec3 directionalLightDir = glm::vec3(-1.0f, -1.0f, 0.0f);
+        for (const auto& obj : g_SceneManager.GetObjects()) {
+            if (obj->GetLightType() == LT_DIRECTIONAL) {
+                directionalLightPos = obj->GetWorldPosition();
+                directionalLightDir = obj->GetLightDirection();
+                break;
+            }
+        }
+        glm::mat4 lightSpaceMatrix = calculateLightSpaceMatrix(directionalLightPos);
+
+        // --- Рендер карты теней ---
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        depthShader.Use();
+        depthShader.SetMat4("lightSpaceMatrix", glm::value_ptr(lightSpaceMatrix));
+        g_SceneManager.RenderDepth(depthShader);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // --- Очистка буферов ---
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
         glClearColor(settings.bg_color[0], settings.bg_color[1], settings.bg_color[2], 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // ========== РЕНДЕР SKYBOX ==========
-        glDepthMask(GL_FALSE); // отключаем запись в буфер глубины
+        // --- Скайбокс ---
+        glDepthMask(GL_FALSE);
         skyboxShader.Use();
-        // Убираем перемещение из матрицы вида (оставляем только поворот)
         glm::mat4 viewNoTranslation = glm::mat4(glm::mat3(view));
         skyboxShader.SetMat4("view", glm::value_ptr(viewNoTranslation));
         skyboxShader.SetMat4("projection", glm::value_ptr(projection));
         skybox.Draw();
         glDepthMask(GL_TRUE);
-        // ====================================
 
-        // Полигональный режим для сцены
+        // --- Рендер сетки (если включена) ---
+        if (settings.grid_enabled) {
+            gridShader.Use();
+            gridShader.SetMat4("view", glm::value_ptr(view));
+            gridShader.SetMat4("projection", glm::value_ptr(projection));
+            gridShader.SetVec3("viewPos", activeCamera->GetWorldPosition().x,
+                                         activeCamera->GetWorldPosition().y,
+                                         activeCamera->GetWorldPosition().z);
+            g_SceneManager.RenderGrid(gridShader, view, projection);
+        }
+
+        // --- Рендер сцены ---
+        shader.Use();
+        shader.SetMat4("projection", glm::value_ptr(projection));
+        shader.SetMat4("view", glm::value_ptr(view));
+        shader.SetVec3("viewPos", activeCamera->GetWorldPosition().x,
+                                 activeCamera->GetWorldPosition().y,
+                                 activeCamera->GetWorldPosition().z);
+        shader.SetFloat("shininess", settings.shininess);
+        shader.SetFloat("metallic", settings.metallic);
+        shader.SetFloat("roughness", settings.roughness);
+        shader.SetFloat("ambientStrength", settings.ambientStrength);
+        shader.SetBool("shadowsEnabled", settings.shadows_enabled);
+        shader.SetFloat("shadowBias", settings.shadow_bias);
+        shader.SetFloat("shadowSoftness", settings.shadowSoftness);
+        shader.SetInt("shadowSamples", settings.shadowSamples);
+        shader.SetMat4("lightSpaceMatrix", glm::value_ptr(lightSpaceMatrix));
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
+        shader.SetInt("shadowMap", 2);
+
+        // Передача источников света
+        struct LightUniform {
+            int type;
+            glm::vec3 position;
+            glm::vec3 direction;
+            glm::vec3 color;
+            float intensity;
+            float range;
+            float angle;
+        };
+        std::vector<LightUniform> lightUniforms;
+        for (const auto& obj : g_SceneManager.GetObjects()) {
+            int type = obj->GetLightType();
+            if (type == LT_NONE) continue;
+            LightUniform lu;
+            lu.type = type;
+            lu.color = obj->GetLightColor();
+            lu.intensity = obj->GetLightIntensity();
+            if (type == LT_DIRECTIONAL) {
+                lu.direction = obj->GetLightDirection();
+                lu.position = glm::vec3(0.0f);
+                lu.range = 0.0f;
+                lu.angle = 0.0f;
+            } else if (type == LT_POINT) {
+                lu.position = obj->GetWorldPosition();
+                lu.range = obj->GetLightRange();
+                lu.direction = glm::vec3(0.0f);
+                lu.angle = 0.0f;
+            } else if (type == LT_SPOT) {
+                lu.position = obj->GetWorldPosition();
+                lu.direction = obj->GetLightDirection();
+                lu.range = obj->GetLightRange();
+                lu.angle = obj->GetLightAngleDeg() * 3.14159265f / 180.0f;
+            }
+            lightUniforms.push_back(lu);
+            if (lightUniforms.size() >= 8) break;
+        }
+        shader.SetInt("numLights", (int)lightUniforms.size());
+        for (size_t i = 0; i < lightUniforms.size(); ++i) {
+            std::string prefix = "lights[" + std::to_string(i) + "].";
+            shader.SetInt(prefix + "type", lightUniforms[i].type);
+            shader.SetVec3(prefix + "position", lightUniforms[i].position.x, lightUniforms[i].position.y, lightUniforms[i].position.z);
+            shader.SetVec3(prefix + "direction", lightUniforms[i].direction.x, lightUniforms[i].direction.y, lightUniforms[i].direction.z);
+            shader.SetVec3(prefix + "color", lightUniforms[i].color.x, lightUniforms[i].color.y, lightUniforms[i].color.z);
+            shader.SetFloat(prefix + "intensity", lightUniforms[i].intensity);
+            shader.SetFloat(prefix + "range", lightUniforms[i].range);
+            shader.SetFloat(prefix + "angle", lightUniforms[i].angle);
+        }
+
         if (settings.wireframe_mode)
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         else
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        // Использование основного шейдера
-        shader.Use();
-        shader.SetMat4("projection", glm::value_ptr(projection));
-        shader.SetMat4("view", glm::value_ptr(view));
-        shader.SetVec3("lightPos", lightPos.x, lightPos.y, lightPos.z);
-        shader.SetVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
-        shader.SetFloat("lightIntensity", settings.light_intensity);
-        shader.SetVec3("viewPos", g_Camera.GetPosition().x, g_Camera.GetPosition().y, g_Camera.GetPosition().z);
-        shader.SetFloat("shininess", settings.shininess);
-        shader.SetFloat("metallic", settings.metallic);
-        shader.SetFloat("roughness", settings.roughness);
-        shader.SetBool("shadowsEnabled", false);
-
-        // Рендер сцены
         g_SceneManager.Render(shader);
-
-        // Возвращаем заполненный режим
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        // ===== ПЕРЕДАЧА МАТРИЦ В UI =====
-        g_EditorUI.SetViewProjection(view, projection);
+        // Outline
+        if (settings.enable_outline) {
+            g_SceneManager.RenderOutline(
+                gizmoShader,
+                view, projection,
+                glm::vec3(settings.outlineColor[0], settings.outlineColor[1], settings.outlineColor[2]),
+                settings.outlineMode,
+                settings.outlinePointSize,
+                settings.outlineFillAlpha
+            );
+        }
 
-        // Отрисовка UI
+        // --- ImGui ---
+        g_EditorUI.SetViewProjection(view, projection);
         g_EditorUI.BeginFrame();
         g_EditorUI.Render();
         g_EditorUI.EndFrame();
@@ -192,19 +282,90 @@ int main() {
     g_EditorUI.Shutdown();
     glfwDestroyWindow(window);
     glfwTerminate();
-
     std::cout << "Binax Engine shutdown successfully." << std::endl;
     return 0;
 }
 
+// ========== ФУНКЦИИ УПРАВЛЕНИЯ КАМЕРОЙ ==========
+
+void processInput(GLFWwindow* window) {
+    if (!mouseCaptured) return;
+    if (g_EditorUI.IsGizmoActive()) return;
+
+    float speed = 5.0f * deltaTime;
+    float forward = 0.0f, right = 0.0f, up = 0.0f;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) forward -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) forward += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) right += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) right -= 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) up += 1.0f;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) up -= 1.0f;
+
+    g_SceneManager.MoveActiveCamera(forward, right, up, speed);
+}
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (!mouseCaptured) return;
+    if (g_EditorUI.IsGizmoActive()) return;
+
+    static float lastX = SCR_WIDTH / 2.0f;
+    static float lastY = SCR_HEIGHT / 2.0f;
+    static bool firstMouse = true;
+
+    if (firstMouse) {
+        lastX = (float)xpos;
+        lastY = (float)ypos;
+        firstMouse = false;
+        return;
+    }
+
+    float xoffset = (float)xpos - lastX;
+    float yoffset = lastY - (float)ypos;
+
+    lastX = (float)xpos;
+    lastY = (float)ypos;
+
+    float sensitivity = 0.1f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    g_SceneManager.RotateActiveCamera(-xoffset, yoffset);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    auto activeCam = g_SceneManager.GetActiveCamera();
+    if (activeCam) {
+        float fov = activeCam->GetCameraFOV();
+        fov -= (float)yoffset;
+        if (fov < 1.0f) fov = 1.0f;
+        if (fov > 120.0f) fov = 120.0f;
+        activeCam->SetCameraFOV(fov);
+    }
+}
+
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+        mouseCaptured = false;
+        firstMouse = true;
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+    if (key == GLFW_KEY_DELETE && action == GLFW_PRESS) {
+        auto selected = g_SceneManager.GetSelectedObject();
+        if (selected) g_SceneManager.DeleteGameObject(selected.get());
+    }
+}
+
+// ========== ИНИЦИАЛИЗАЦИЯ ШЕЙДЕРОВ ==========
+
 bool initShaders() {
-    std::cout << "Loading shaders from assets/shaders/..." << std::endl;
+    std::cout << "Loading shaders..." << std::endl;
     bool shadersLoaded = shader.Load("assets/shaders/basic.vert", "assets/shaders/basic.frag");
     bool gridLoaded = gridShader.Load("assets/shaders/grid.vert", "assets/shaders/grid.frag");
     bool gizmoLoaded = gizmoShader.Load("assets/shaders/gizmo.vert", "assets/shaders/gizmo.frag");
-    bool skyboxLoaded = skyboxShader.Load("assets/shaders/skybox.vert", "assets/shaders/skybox.frag"); // <-- добавили
-
-    if (!shadersLoaded || !gridLoaded || !gizmoLoaded || !skyboxLoaded) {
+    bool skyboxLoaded = skyboxShader.Load("assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
+    bool depthLoaded = depthShader.Load("assets/shaders/depth.vert", "assets/shaders/depth.frag");
+    if (!shadersLoaded || !gridLoaded || !gizmoLoaded || !skyboxLoaded || !depthLoaded) {
         std::cerr << "ERROR: Failed to load shaders!" << std::endl;
         return false;
     }
@@ -235,54 +396,9 @@ bool initShadowMap() {
     return true;
 }
 
-void processInput(GLFWwindow* window) {
-    if (!mouseCaptured) return;
-    float speed = 5.0f * deltaTime;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        g_Camera.MoveForward(speed);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        g_Camera.MoveBackward(speed);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        g_Camera.MoveLeft(speed);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        g_Camera.MoveRight(speed);
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-        g_Camera.MoveUp(speed);
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-        g_Camera.MoveDown(speed);
-}
-
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-    if (!mouseCaptured) return;
-    static float lastX = SCR_WIDTH / 2.0f;
-    static float lastY = SCR_HEIGHT / 2.0f;
-    static bool firstMouse = true;
-    if (firstMouse) {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-        return;
-    }
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos;
-    lastX = xpos;
-    lastY = ypos;
-    g_Camera.ProcessMouseMovement(xoffset, yoffset);
-}
-
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    g_Camera.ProcessMouseScroll(static_cast<float>(yoffset));
-}
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        mouseCaptured = false;
-        firstMouse = true;
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
-    if (key == GLFW_KEY_DELETE && action == GLFW_PRESS) {
-        auto selected = g_SceneManager.GetSelectedObject();
-        if (selected)
-            g_SceneManager.DeleteGameObject(selected.get());
-    }
+glm::mat4 calculateLightSpaceMatrix(const glm::vec3& lightPos, const glm::vec3& center) {
+    float near_plane = 1.0f, far_plane = 10.0f;
+    glm::mat4 lightProjection = glm::ortho(-5.0f, 5.0f, -5.0f, 5.0f, near_plane, far_plane);
+    glm::mat4 lightView = glm::lookAt(lightPos, center, glm::vec3(0.0f, 1.0f, 0.0f));
+    return lightProjection * lightView;
 }
