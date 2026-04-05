@@ -5,16 +5,19 @@
 #include <glm/glm.hpp>
 #include "imgui.h"
 #include "ImGuizmo.h"
+#include "EditorTheme.h"
 
-// Forward declarations
 class SceneManager;
 class GameObject;
+class Skybox;
 
 struct EditorSettings {
     bool show_gizmo = true;
     bool wireframe_mode = false;
     bool grid_enabled = true;
     bool snap_to_grid = false;
+    bool enable_outline = false;
+    bool skyboxSeamless = true;   // убирать стыки
     float grid_size = 1.0f;
     float bg_color[3] = {0.1f, 0.1f, 0.1f};
     float shininess = 32.0f;
@@ -25,6 +28,23 @@ struct EditorSettings {
     glm::vec3 light_color = glm::vec3(1.0f, 1.0f, 1.0f);
     bool shadows_enabled = true;
     float shadow_bias = 0.005f;
+
+    bool useSnap = false;
+    float snapTranslation = 0.1f;
+    float snapRotation = 5.0f;
+    float snapScale = 0.1f;
+
+    bool vsync = true;  // по умолчанию включено
+
+    float outlineColor[3] = {0.95f, 0.55f, 0.15f};
+    int outlineMode = 0;
+    float outlinePointSize = 4.0f;
+    float outlineFillAlpha = 0.3f;
+
+    int shadowMapSize = 2048;
+    float shadowSoftness = 2.0f;
+    int shadowSamples = 4;
+    float ambientStrength = 0.05f;
 };
 
 class EditorUI {
@@ -50,6 +70,11 @@ public:
     bool IsViewportHovered() const { return m_ViewportHovered; }
     GLFWwindow* GetWindow() const { return m_Window; }
 
+    void DrawThemeEditor();
+    void SetSkybox(Skybox* skybox) { m_Skybox = skybox; }
+    bool IsGizmoActive() const { return m_GizmoActive; }
+    
+
 private:
     void SetupImGuiStyle();
     void DrawMainMenuBar();
@@ -62,12 +87,11 @@ private:
     void DrawTransformControls(std::shared_ptr<GameObject> obj);
     void DrawObjectTreeNode(std::shared_ptr<GameObject> obj, int& id);
     void DrawGizmoToolbar();
-
-    // === Новые методы для загрузки текстур ===
     void DrawMaterialControls(std::shared_ptr<GameObject> obj);
+    void DrawSkyboxSettings();
+    void DrawShadowsSettings();
     std::string OpenFileDialog(const char* filter);
 
-private:
     GLFWwindow* m_Window = nullptr;
     SceneManager* m_SceneManager = nullptr;
     ImGuiContext* m_ImGuiContext = nullptr;
@@ -76,6 +100,11 @@ private:
     bool m_ShowDemoWindow = false;
     bool m_ShowMetricsWindow = false;
     bool m_ShowAboutPopup = false;
+    bool m_ShowSkyboxSettings = false;
+    bool m_ShowShadowsSettings = false;
+    bool m_ShowThemeEditor = false;
+    bool m_FirstLaunch = false;
+    bool m_GizmoActive = false;
 
     float m_MenuBarHeight = 0.0f;
     ImVec2 m_ViewportSize;
@@ -83,8 +112,22 @@ private:
     bool m_ViewportHovered = false;
     bool m_ViewportFocused = false;
 
+    void LoadEditorSettings();
+    void SaveEditorSettings();
+
     glm::mat4 m_ViewMatrix = glm::mat4(1.0f);
     glm::mat4 m_ProjectionMatrix = glm::mat4(1.0f);
     ImGuizmo::OPERATION m_CurrentGizmoOperation = ImGuizmo::TRANSLATE;
     ImGuizmo::MODE m_CurrentGizmoMode = ImGuizmo::WORLD;
+
+    EditorTheme m_Theme;
+    Skybox* m_Skybox = nullptr;
+    std::string m_SkyboxPaths[6] = {
+    "resources/embedded_assets/skybox/right.png",
+    "resources/embedded_assets/skybox/left.png",
+    "resources/embedded_assets/skybox/top.png",
+    "resources/embedded_assets/skybox/bottom.png",
+    "resources/embedded_assets/skybox/front.png",
+    "resources/embedded_assets/skybox/back.png"
+    };
 };
