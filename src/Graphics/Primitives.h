@@ -11,4 +11,5 @@ public:
     static std::shared_ptr<Mesh> CreateCone(int segments = 32);
     static std::shared_ptr<Mesh> CreatePyramid();
     static std::shared_ptr<Mesh> CreatePlane();
+    static std::shared_ptr<Mesh> CreateSkyboxSphere(int segments = 64);
 };
