@@ -90,6 +90,7 @@ private:
     void DrawMaterialControls(std::shared_ptr<GameObject> obj);
     void DrawSkyboxSettings();
     void DrawShadowsSettings();
+    void DrawPhysicsComponents(std::shared_ptr<GameObject> obj);
     std::string OpenFileDialog(const char* filter);
 
     GLFWwindow* m_Window = nullptr;
