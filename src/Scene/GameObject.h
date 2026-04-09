@@ -8,7 +8,6 @@
 #include "Graphics/Material.h"   
 #include <glm/gtc/quaternion.hpp>
 
-// Forward declarations for Bullet (чтобы компилятор знал, что это классы)
 class btRigidBody;
 class btCollisionShape;
 
@@ -26,7 +25,7 @@ enum ColliderType {
     COLLIDER_CAPSULE
 };
 
-class GameObject {
+class GameObject : public std::enable_shared_from_this<GameObject> {
 public:
     GameObject(const std::string& name = "GameObject");
     ~GameObject();
@@ -36,6 +35,13 @@ public:
     void RemoveChild(GameObject* child);
     GameObject* GetParent() const { return m_Parent; }
     const std::vector<std::shared_ptr<GameObject>>& GetChildren() const { return m_Children; }
+
+    // Проверка, можно ли добавлять физику (нет родителей и детей)
+    bool CanHavePhysics() const;
+
+    // Управление иерархией
+    void Unparent();  // открепить от родителя, сохранив мировую трансформацию
+    void SetParent(std::shared_ptr<GameObject> newParent, bool keepWorldPosition = true);
 
     // Трансформация
     void SetPosition(const glm::vec3& position);
@@ -59,7 +65,7 @@ public:
     void SetColor(const glm::vec3& color) { m_Color = color; }
     glm::vec3 GetColor() const { return m_Color; }
 
-    // ===== Материал =====
+    // Материал
     void SetMaterial(std::shared_ptr<Material> mat) { m_Material = mat; }
     std::shared_ptr<Material> GetMaterial() const { return m_Material; }
 
@@ -71,6 +77,7 @@ public:
     void SetReceiveShadows(bool receive) { m_ReceiveShadows = receive; }
     bool ReceiveShadows() const { return m_ReceiveShadows; }
 
+    // Light
     void SetLightType(int type) { m_LightType = type; }
     int GetLightType() const { return m_LightType; }
     void SetLightColor(const glm::vec3& color) { m_LightColor = color; }
@@ -84,59 +91,59 @@ public:
     void SetLightDirection(const glm::vec3& dir) { m_LightDirection = glm::normalize(dir); }
     glm::vec3 GetLightDirection() const { return m_LightDirection; }
 
-     bool IsCamera() const { return m_IsCamera; }
+    // Camera
+    bool IsCamera() const { return m_IsCamera; }
     void SetIsCamera(bool isCamera) { m_IsCamera = isCamera; }
-    
     float GetCameraFOV() const { return m_CameraFOV; }
     void SetCameraFOV(float fov) { m_CameraFOV = fov; }
-    
     float GetCameraNear() const { return m_CameraNear; }
     void SetCameraNear(float nearVal) { m_CameraNear = nearVal; }
-    
     float GetCameraFar() const { return m_CameraFar; }
     void SetCameraFar(float farVal) { m_CameraFar = farVal; }
-    
-    // Получить матрицы вида и проекции от этой камеры
     glm::mat4 GetCameraViewMatrix() const;
     glm::mat4 GetCameraProjectionMatrix(float aspectRatio) const;
 
-     // Физика
+    // Physics
     void AddRigidBody(float mass = 1.0f);
     void RemoveRigidBody();
     bool HasRigidBody() const { return m_rigidBody != nullptr; }
     float GetMass() const { return m_mass; }
     void SetMass(float mass) { m_mass = mass; }
-
     void SetColliderType(ColliderType type);
     ColliderType GetColliderType() const { return m_colliderType; }
-
-    // Синхронизация трансформации с физическим телом
     void SyncTransformToPhysics();
     void SyncPhysicsToTransform();
-
-    // Сброс в начальное состояние (для кнопки Return)
     void SaveInitialTransform();
     void ResetToInitialTransform();
-
-    // Параметры материала
-   void SetFriction(float friction);
-   float GetFriction() const { return m_friction; }
-   void SetRestitution(float restitution);
-   float GetRestitution() const { return m_restitution; }
-   void SetRollingFriction(float rollingFriction);
-   float GetRollingFriction() const { return m_rollingFriction; }
-
-// Демпфирование
+    void SetFriction(float friction);
+    float GetFriction() const { return m_friction; }
+    void SetRestitution(float restitution);
+    float GetRestitution() const { return m_restitution; }
+    void SetRollingFriction(float rollingFriction);
+    float GetRollingFriction() const { return m_rollingFriction; }
     void SetLinearDamping(float damping);
     float GetLinearDamping() const { return m_linearDamping; }
     void SetAngularDamping(float damping);
-    float GetAngularDamping() const { return m_angularDamping; } 
-
-    // Доступ к btRigidBody
+    float GetAngularDamping() const { return m_angularDamping; }
     btRigidBody* GetRigidBody() { return m_rigidBody; }
+    void UpdatePhysicsBody();
 
-    void UpdatePhysicsBody(); // создаёт или обновляет физическое тело на основе коллайдера и массы
+    // В public секцию
+    void SetIsFog(bool fog) { m_IsFog = fog; }
+    bool IsFog() const { return m_IsFog; }
 
+    void SetFogEnabled(bool enabled) { m_FogEnabled = enabled; }
+    bool GetFogEnabled() const { return m_FogEnabled; }
+    void SetFogType(int type) { m_FogType = type; }
+    int GetFogType() const { return m_FogType; }
+    void SetFogColor(const glm::vec3& color) { m_FogColor = color; }
+    glm::vec3 GetFogColor() const { return m_FogColor; }
+    void SetFogDensity(float density) { m_FogDensity = density; }
+    float GetFogDensity() const { return m_FogDensity; }
+    void SetFogLinearStart(float start) { m_FogLinearStart = start; }
+    float GetFogLinearStart() const { return m_FogLinearStart; }
+    void SetFogLinearEnd(float end) { m_FogLinearEnd = end; }
+    float GetFogLinearEnd() const { return m_FogLinearEnd; }
 
 private:
     std::string m_Name;
@@ -151,9 +158,7 @@ private:
     bool m_Visible = true;
     bool m_CastShadows = true;
     bool m_ReceiveShadows = true;
-
-    std::shared_ptr<Material> m_Material;   // <-- новое поле
-
+    std::shared_ptr<Material> m_Material;
     glm::vec3 m_PreviousRotation = glm::vec3(0.0f);
 
     int m_LightType = LT_NONE;
@@ -168,22 +173,26 @@ private:
     float m_CameraNear = 0.1f;
     float m_CameraFar = 100.0f;
 
-    // Физические компоненты
     btRigidBody* m_rigidBody = nullptr;
     btCollisionShape* m_collisionShape = nullptr;
     ColliderType m_colliderType = COLLIDER_NONE;
     float m_mass = 0.0f;
 
-    // Физические параметры материала
     float m_friction = 0.5f;
     float m_restitution = 0.5f;
     float m_rollingFriction = 0.1f;
-
-// Демпфирование
     float m_linearDamping = 0.0f;
     float m_angularDamping = 0.0f;
 
-    // Начальные трансформации для сброса
+    // В private секцию (в конец списка полей)
+    bool m_IsFog = false;
+    bool m_FogEnabled = false;
+    int m_FogType = 1;          // 1=Linear, 2=Exponential, 3=Exponential Squared
+    glm::vec3 m_FogColor = glm::vec3(0.5f, 0.6f, 0.7f);
+    float m_FogDensity = 0.04f;
+    float m_FogLinearStart = 10.0f;
+    float m_FogLinearEnd = 50.0f;
+
     glm::vec3 m_initialPosition;
     glm::vec3 m_initialRotation;
     glm::vec3 m_initialScale;
