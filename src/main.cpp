@@ -27,15 +27,23 @@ Shader gridShader;
 Shader gizmoShader;
 Shader skyboxShader;
 Shader depthShader;
+Shader screenFogShader;  // шейдер для пост-эффекта тумана
 
 Skybox skybox;
 
-// Карта теней (теперь не const, чтобы можно было менять размер)
+// Карта теней
 unsigned int depthMapFBO;
 unsigned int depthMap;
 unsigned int SHADOW_WIDTH = 2048;
 unsigned int SHADOW_HEIGHT = 2048;
 
+// Для пост-эффектов
+unsigned int framebuffer;
+unsigned int sceneTexture;
+unsigned int depthTexture;
+unsigned int quadVAO, quadVBO;
+
+// Прототипы
 void processInput(GLFWwindow* window);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
@@ -43,6 +51,60 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 bool initShaders();
 bool initShadowMap();
 glm::mat4 calculateLightSpaceMatrix(const glm::vec3& lightPos, const glm::vec3& center = glm::vec3(0.0f));
+void initPostProcessing(int width, int height);
+void renderFullScreenQuad();
+
+// Реализация initPostProcessing и renderFullScreenQuad (как у вас, но без ошибок)
+void initPostProcessing(int width, int height) {
+    // Создаём FBO
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    
+    // Текстура для цвета
+    glGenTextures(1, &sceneTexture);
+    glBindTexture(GL_TEXTURE_2D, sceneTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sceneTexture, 0);
+    
+    // Текстура глубины
+    glGenTextures(1, &depthTexture);
+    glBindTexture(GL_TEXTURE_2D, depthTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+    
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "Framebuffer not complete!" << std::endl;
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    // Данные для полноэкранного квада
+    float quadVertices[] = {
+        -1.0f,  1.0f,  0.0f, 1.0f,
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+        -1.0f,  1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f
+    };
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+}
+
+void renderFullScreenQuad() {
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
 
 int main() {
     std::cout << "=== Binax Engine Editor ===" << std::endl;
@@ -79,8 +141,8 @@ int main() {
     std::cout << "OpenGL: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "GPU: " << glGetString(GL_RENDERER) << std::endl;
 
-        g_SceneManager.InitializePhysics(); // сначала мир
-        g_SceneManager.Initialize();        // потом объекты (они вызовут UpdatePhysicsBody, и мир уже существует)// <-- важно
+    g_SceneManager.InitializePhysics();
+    g_SceneManager.Initialize();
     if (!g_EditorUI.Initialize(window, &g_SceneManager)) {
         std::cerr << "Failed to initialize EditorUI" << std::endl;
         return -1;
@@ -89,6 +151,8 @@ int main() {
 
     if (!initShaders()) return -1;
     if (!initShadowMap()) return -1;
+
+    initPostProcessing(SCR_WIDTH, SCR_HEIGHT);
 
     skybox.Load(
         "resources/embedded_assets/skybox/right.png",
@@ -109,7 +173,6 @@ int main() {
 
         auto& settings = g_EditorUI.GetSettings();
 
-        // --- Динамическое изменение размера карты теней ---
         static unsigned int lastShadowMapSize = SHADOW_WIDTH;
         if (settings.shadowMapSize != lastShadowMapSize) {
             lastShadowMapSize = settings.shadowMapSize;
@@ -122,7 +185,6 @@ int main() {
 
         g_SceneManager.UpdatePhysics(deltaTime);
 
-        // --- Получаем активную камеру ---
         auto activeCamera = g_SceneManager.GetActiveCamera();
         if (!activeCamera) {
             glfwSwapBuffers(window);
@@ -155,12 +217,13 @@ int main() {
         g_SceneManager.RenderDepth(depthShader);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-        // --- Очистка буферов ---
+        // --- Рендер сцены в текстуру (FBO) ---
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
         glClearColor(settings.bg_color[0], settings.bg_color[1], settings.bg_color[2], 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // --- Скайбокс ---
+        // Скайбокс
         glDepthMask(GL_FALSE);
         skyboxShader.Use();
         glm::mat4 viewNoTranslation = glm::mat4(glm::mat3(view));
@@ -169,7 +232,7 @@ int main() {
         skybox.Draw();
         glDepthMask(GL_TRUE);
 
-        // --- Рендер сетки (если включена) ---
+        // Сетка
         if (settings.grid_enabled) {
             gridShader.Use();
             gridShader.SetMat4("view", glm::value_ptr(view));
@@ -180,7 +243,7 @@ int main() {
             g_SceneManager.RenderGrid(gridShader, view, projection);
         }
 
-        // --- Рендер сцены ---
+        // Основные объекты
         shader.Use();
         shader.SetMat4("projection", glm::value_ptr(projection));
         shader.SetMat4("view", glm::value_ptr(view));
@@ -257,7 +320,6 @@ int main() {
         g_SceneManager.Render(shader);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        // Outline
         if (settings.enable_outline) {
             g_SceneManager.RenderOutline(
                 gizmoShader,
@@ -268,6 +330,38 @@ int main() {
                 settings.outlineFillAlpha
             );
         }
+
+        // --- Пост-эффект тумана ---
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClear(GL_DEPTH_BUFFER_BIT); // очищаем только глубину
+
+        screenFogShader.Use();
+        screenFogShader.SetInt("sceneTexture", 0);
+        screenFogShader.SetInt("depthTexture", 1);
+        screenFogShader.SetMat4("invProjection", glm::value_ptr(glm::inverse(projection)));
+        screenFogShader.SetMat4("invView", glm::value_ptr(glm::inverse(view)));
+        screenFogShader.SetVec3("viewPos", activeCamera->GetWorldPosition().x,
+                                            activeCamera->GetWorldPosition().y,
+                                            activeCamera->GetWorldPosition().z);
+
+        // Параметры тумана из SceneManager
+auto fogObj = g_SceneManager.GetActiveFog();
+if (fogObj && fogObj->GetFogEnabled()) {
+    screenFogShader.SetBool("fogEnabled", true);
+    screenFogShader.SetVec3("fogColor", fogObj->GetFogColor().x, fogObj->GetFogColor().y, fogObj->GetFogColor().z);
+    screenFogShader.SetInt("fogType", fogObj->GetFogType());
+    screenFogShader.SetFloat("fogDensity", fogObj->GetFogDensity());
+    screenFogShader.SetFloat("fogStart", fogObj->GetFogLinearStart());
+    screenFogShader.SetFloat("fogEnd", fogObj->GetFogLinearEnd());
+} else {
+    screenFogShader.SetBool("fogEnabled", false);
+}
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, sceneTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depthTexture);
+        renderFullScreenQuad();
 
         // --- ImGui ---
         g_EditorUI.SetViewProjection(view, projection);
@@ -286,8 +380,7 @@ int main() {
     return 0;
 }
 
-// ========== ФУНКЦИИ УПРАВЛЕНИЯ КАМЕРОЙ ==========
-
+// ========== ФУНКЦИИ УПРАВЛЕНИЯ ==========
 void processInput(GLFWwindow* window) {
     if (!mouseCaptured) return;
     if (g_EditorUI.IsGizmoActive()) return;
@@ -357,7 +450,6 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 }
 
 // ========== ИНИЦИАЛИЗАЦИЯ ШЕЙДЕРОВ ==========
-
 bool initShaders() {
     std::cout << "Loading shaders..." << std::endl;
     bool shadersLoaded = shader.Load("assets/shaders/basic.vert", "assets/shaders/basic.frag");
@@ -365,7 +457,9 @@ bool initShaders() {
     bool gizmoLoaded = gizmoShader.Load("assets/shaders/gizmo.vert", "assets/shaders/gizmo.frag");
     bool skyboxLoaded = skyboxShader.Load("assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
     bool depthLoaded = depthShader.Load("assets/shaders/depth.vert", "assets/shaders/depth.frag");
-    if (!shadersLoaded || !gridLoaded || !gizmoLoaded || !skyboxLoaded || !depthLoaded) {
+    bool fogLoaded = screenFogShader.Load("assets/shaders/screen.vert", "assets/shaders/screen_fog.frag");
+    
+    if (!shadersLoaded || !gridLoaded || !gizmoLoaded || !skyboxLoaded || !depthLoaded || !fogLoaded) {
         std::cerr << "ERROR: Failed to load shaders!" << std::endl;
         return false;
     }
